@@ -7,12 +7,13 @@ export const maxDuration = 60;
 
 export async function POST(req: Request) {
   try {
-    const { messages, phase } = (await req.json()) as {
+    const { messages, phase, researchContext } = (await req.json()) as {
       messages: Array<{ role: 'user' | 'assistant'; content: string }>;
       phase: ConversationPhase;
+      researchContext?: string;
     };
 
-    const systemPrompt = getSystemPrompt(phase);
+    const systemPrompt = getSystemPrompt(phase, researchContext);
 
     const result = streamText({
       model: anthropic('claude-opus-4-5-20251101'),

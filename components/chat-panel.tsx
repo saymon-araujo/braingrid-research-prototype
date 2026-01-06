@@ -25,6 +25,7 @@ import type { ConversationPhase } from '@/types';
 
 const phaseLabels: Record<ConversationPhase, string> = {
   initial: 'Getting Started',
+  researching: 'Researching',
   clarifying: 'Gathering Info',
   generating: 'Generating',
   complete: 'Complete',
@@ -32,6 +33,7 @@ const phaseLabels: Record<ConversationPhase, string> = {
 
 const phaseVariants: Record<ConversationPhase, 'default' | 'secondary' | 'outline'> = {
   initial: 'secondary',
+  researching: 'outline',
   clarifying: 'default',
   generating: 'outline',
   complete: 'secondary',
@@ -48,15 +50,16 @@ export function ChatPanel() {
   ]);
   const [isLoading, setIsLoading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isResearching, setIsResearching] = useState(false);
   const [showWelcomeDialog, setShowWelcomeDialog] = useState(false);
   const [localInput, setLocalInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const handleAIResponse = (content: string) => {
+  const handleAIResponse = (content: string, skipGeneration = false) => {
     const parsed = parseAIResponse(content);
 
     // Check if we should trigger generation
-    if (parsed.shouldGenerate && state.conversationPhase === 'clarifying') {
+    if (parsed.shouldGenerate && state.conversationPhase === 'clarifying' && !skipGeneration) {
       setIsGenerating(true);
       dispatch({ type: 'SET_PHASE', payload: 'generating' });
 
@@ -80,19 +83,116 @@ export function ChatPanel() {
     }
   };
 
+  // Trigger research using Perplexity Sonar
+  const triggerResearch = async (projectDescription: string): Promise<typeof state.research> => {
+    setIsResearching(true);
+    dispatch({ type: 'SET_PHASE', payload: 'researching' });
+
+    // Add research status message
+    const researchMsgId = `research_${Date.now()}`;
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: researchMsgId,
+        role: 'assistant',
+        content: 'Researching your project domain to provide informed guidance...',
+      },
+    ]);
+
+    try {
+      const response = await fetch('/api/research', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectDescription }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Research API error:', errorText);
+        throw new Error('Research failed');
+      }
+
+      const researchResults = await response.json();
+      console.log('Research complete:', researchResults);
+
+      // Store research in context
+      dispatch({ type: 'SET_RESEARCH', payload: researchResults });
+      dispatch({ type: 'SET_ACTIVE_TAB', payload: 'research' });
+
+      // Update message with research summary
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === researchMsgId
+            ? {
+                ...m,
+                content: `I've researched your project domain and found ${researchResults.findings?.length || 0} relevant insights. Check the Research tab for details.\n\nBased on my research, let me ask you some informed questions to better understand your needs...`,
+              }
+            : m
+        )
+      );
+
+      // Transition to clarifying phase
+      dispatch({ type: 'SET_PHASE', payload: 'clarifying' });
+
+      return researchResults;
+    } catch (error) {
+      console.error('Research error:', error);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === researchMsgId
+            ? {
+                ...m,
+                content: 'Research step skipped. Let me ask you some questions to understand your project better...',
+              }
+            : m
+        )
+      );
+      // Continue to clarifying even if research fails
+      dispatch({ type: 'SET_PHASE', payload: 'clarifying' });
+      return null;
+    } finally {
+      setIsResearching(false);
+    }
+  };
+
   const sendMessage = async (content: string) => {
     const userMessage = { id: `user_${Date.now()}`, role: 'user' as const, content };
     const newMessages = [...messages, userMessage];
     setMessages(newMessages);
+
+    // If in initial phase, trigger research first
+    if (state.conversationPhase === 'initial') {
+      const researchResults = await triggerResearch(content);
+      // After research, continue with clarifying questions
+      // Pass research results directly since state won't be updated yet
+      await sendChatMessage(newMessages, 'clarifying', researchResults);
+      return;
+    }
+
+    await sendChatMessage(newMessages, state.conversationPhase);
+  };
+
+  const sendChatMessage = async (
+    chatMessages: Array<{ id: string; role: 'user' | 'assistant'; content: string }>,
+    phase: ConversationPhase,
+    researchOverride?: typeof state.research
+  ) => {
     setIsLoading(true);
 
     try {
+      // Include research context if available (use override or state)
+      const research = researchOverride ?? state.research;
+      const researchContext = research
+        ? `\n\n[RESEARCH_CONTEXT]\nResearch Summary: ${research.summary}\nKey Findings: ${research.findings.slice(0, 5).map((f) => `- ${f.title}: ${f.content.substring(0, 200)}`).join('\n')}\nSuggested Questions: ${research.suggestedQuestions?.join(', ') || 'None'}\n[/RESEARCH_CONTEXT]`
+        : '';
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
-          phase: state.conversationPhase,
+          messages: chatMessages.map((m) => ({ role: m.role, content: m.content })),
+          phase,
+          researchContext,
         }),
       });
 
@@ -149,16 +249,7 @@ export function ChatPanel() {
     }
   }, [messages.length, state.requirements, state.tasks.length, state.conversationPhase]);
 
-  // Transition from initial to clarifying after first user message
-  useEffect(() => {
-    if (
-      state.conversationPhase === 'initial' &&
-      messages.filter((m) => m.role === 'user').length >= 1 &&
-      messages.filter((m) => m.role === 'assistant').length >= 2
-    ) {
-      dispatch({ type: 'SET_PHASE', payload: 'clarifying' });
-    }
-  }, [messages, state.conversationPhase, dispatch]);
+  // Phase transitions are now handled in sendMessage and triggerResearch
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -289,7 +380,7 @@ export function ChatPanel() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!localInput.trim() || isLoading || isGenerating) return;
+    if (!localInput.trim() || isLoading || isGenerating || isResearching) return;
     sendMessage(localInput);
     setLocalInput('');
   };
@@ -306,7 +397,7 @@ export function ChatPanel() {
     }
   };
 
-  const hasContent = state.requirements || state.tasks.length > 0;
+  const hasContent = state.requirements || state.tasks.length > 0 || state.research;
 
   return (
     <>
@@ -376,11 +467,15 @@ export function ChatPanel() {
                 </div>
               </div>
             ))}
-            {(isLoading || isGenerating) && (
+            {(isLoading || isGenerating || isResearching) && (
               <div className="flex justify-start">
                 <div className="flex items-center gap-2 rounded-lg bg-muted px-4 py-3 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  {isGenerating ? 'Generating requirements and tasks...' : 'Thinking...'}
+                  {isResearching
+                    ? 'Researching your project domain...'
+                    : isGenerating
+                      ? 'Generating requirements and tasks...'
+                      : 'Thinking...'}
                 </div>
               </div>
             )}
@@ -400,7 +495,7 @@ export function ChatPanel() {
                   : 'Describe your project...'
               }
               className="min-h-[80px] resize-none bg-background"
-              disabled={isLoading || isGenerating}
+              disabled={isLoading || isGenerating || isResearching}
             />
             <div className="flex items-center justify-between">
               <span className="text-xs text-muted-foreground">
@@ -409,9 +504,9 @@ export function ChatPanel() {
               <Button
                 type="submit"
                 size="sm"
-                disabled={!localInput.trim() || isLoading || isGenerating}
+                disabled={!localInput.trim() || isLoading || isGenerating || isResearching}
               >
-                {isLoading || isGenerating ? (
+                {isLoading || isGenerating || isResearching ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <Send className="h-4 w-4" />

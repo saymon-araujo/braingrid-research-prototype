@@ -1,17 +1,18 @@
 'use client';
 
-import { FileText, ListTodo, Sparkles } from 'lucide-react';
+import { FileText, ListTodo, Sparkles, Search } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { RequirementsTab } from '@/components/requirements-tab';
 import { TasksTab } from '@/components/tasks-tab';
+import { ResearchTab } from '@/components/research-tab';
 import { useBrainGrid } from '@/context/braingrid-context';
 
 export function ContentPanel() {
   const { state, dispatch } = useBrainGrid();
 
   const handleTabChange = (value: string) => {
-    dispatch({ type: 'SET_ACTIVE_TAB', payload: value as 'requirements' | 'tasks' });
+    dispatch({ type: 'SET_ACTIVE_TAB', payload: value as 'requirements' | 'tasks' | 'research' });
   };
 
   const hasGeneratedContent = state.requirements || state.tasks.length > 0;
@@ -64,6 +65,16 @@ export function ContentPanel() {
                 <span className="ml-2 h-2 w-2 rounded-full bg-primary" />
               )}
             </TabsTrigger>
+            <TabsTrigger
+              value="research"
+              className="relative h-12 rounded-none border-b-2 border-transparent bg-transparent px-4 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+            >
+              <Search className="mr-2 h-4 w-4" />
+              Research
+              {state.research && (
+                <span className="ml-2 h-2 w-2 rounded-full bg-primary" />
+              )}
+            </TabsTrigger>
           </TabsList>
         </div>
 
@@ -73,6 +84,9 @@ export function ContentPanel() {
           </TabsContent>
           <TabsContent value="tasks" className="m-0 h-full">
             <TasksTab />
+          </TabsContent>
+          <TabsContent value="research" className="m-0 h-full">
+            <ResearchTab />
           </TabsContent>
         </div>
       </Tabs>

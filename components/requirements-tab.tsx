@@ -30,7 +30,7 @@ export function RequirementsTab() {
   };
 
   const handleCancel = () => {
-    setEditContent(state.requirements);
+    setEditContent(state.requirements || '');
     setIsEditing(false);
   };
 
@@ -149,7 +149,7 @@ export function RequirementsTab() {
                 ),
               }}
             >
-              {state.requirements}
+              {state.requirements || ''}
             </ReactMarkdown>
           </div>
         )}

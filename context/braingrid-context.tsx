@@ -13,8 +13,9 @@ const initialState: BrainGridState = {
         "Hello! I'm BrainGrid, your AI assistant for project planning. Tell me about the project or feature you'd like to work on, and I'll help you create detailed requirements and actionable tasks.",
     },
   ],
-  requirements: '',
+  requirements: null,
   tasks: [],
+  research: null,
   isLoading: false,
   activeTab: 'requirements',
 };
@@ -43,6 +44,9 @@ function reducer(state: BrainGridState, action: BrainGridAction): BrainGridState
 
     case 'SET_TASKS':
       return { ...state, tasks: action.payload };
+
+    case 'SET_RESEARCH':
+      return { ...state, research: action.payload };
 
     case 'TOGGLE_TASK':
       return {

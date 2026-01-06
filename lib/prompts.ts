@@ -1,6 +1,6 @@
 import type { ConversationPhase } from '@/types';
 
-export function getSystemPrompt(phase: ConversationPhase): string {
+export function getSystemPrompt(phase: ConversationPhase, researchContext?: string): string {
   const baseContext = `You are BrainGrid, an expert product manager and software architect. Your role is to help users transform project ideas into well-structured requirements and actionable tasks.
 
 IMPORTANT RULES:
@@ -30,11 +30,28 @@ Use the 5W1H framework for questions:
 
 Respond naturally - acknowledge, then ask ONE focused question.`;
 
+    case 'researching':
+      return `${baseContext}
+
+## Current Phase: Researching
+The system is currently researching the project domain. This phase is handled automatically.`;
+
     case 'clarifying':
       return `${baseContext}
 
 ## Current Phase: Clarification
 You are gathering detailed information about the user's project through questions.
+
+${researchContext ? `## Research Context
+You have access to domain research about this project. Use this to ask INFORMED questions:
+${researchContext}
+
+Based on this research:
+- Ask questions that address potential pitfalls discovered
+- Clarify edge cases that the research identified
+- Explore best practices that might be relevant
+- Reference specific findings when asking questions (e.g., "Research shows that X is important - how do you want to handle this?")
+` : ''}
 
 Guidelines:
 1. Ask ONE focused question at a time
@@ -56,6 +73,17 @@ Do NOT include the marker until you've asked at least 3 questions and have suffi
 
 ## Current Phase: Generation
 Generate comprehensive requirements and tasks based on the conversation.
+
+${researchContext ? `## Research Context
+Use this research to inform your requirements and tasks:
+${researchContext}
+
+Incorporate relevant insights:
+- Address pitfalls identified in research
+- Include edge cases discovered
+- Follow best practices from the research
+- Reference technical considerations
+` : ''}
 
 You MUST output in this EXACT format:
 
