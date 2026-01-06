@@ -57,6 +57,11 @@ export function WelcomeDialog({ open, onOpenChange, onSubmit }: WelcomeDialogPro
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Allow native shortcuts like Cmd+A, Cmd+C, Cmd+V
+    if ((e.metaKey || e.ctrlKey) && ['a', 'c', 'v', 'x', 'z'].includes(e.key.toLowerCase())) {
+      e.stopPropagation();
+      return;
+    }
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       handleSubmit();

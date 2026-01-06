@@ -2,7 +2,6 @@
 
 import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { useChat } from '@ai-sdk/react';
 import { Send, Loader2, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -40,54 +39,100 @@ const phaseVariants: Record<ConversationPhase, 'default' | 'secondary' | 'outlin
 
 export function ChatPanel() {
   const { state, dispatch } = useBrainGrid();
+  const [messages, setMessages] = useState<Array<{ id: string; role: 'user' | 'assistant'; content: string }>>([
+    {
+      id: 'welcome',
+      role: 'assistant',
+      content: "Hello! I'm BrainGrid, your AI assistant for project planning. Tell me about the project or feature you'd like to work on, and I'll help you create detailed requirements and actionable tasks.",
+    },
+  ]);
+  const [isLoading, setIsLoading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [showWelcomeDialog, setShowWelcomeDialog] = useState(false);
   const [localInput, setLocalInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const {
-    messages,
-    isLoading,
-    setMessages,
-    append,
-  } = useChat({
-    api: '/api/chat',
-    body: {
-      phase: state.conversationPhase,
-    },
-    initialMessages: state.messages.map((m) => ({
-      id: m.id,
-      role: m.role,
-      content: m.content,
-    })),
-    onFinish: (message) => {
-      const parsed = parseAIResponse(message.content);
+  const handleAIResponse = (content: string) => {
+    const parsed = parseAIResponse(content);
 
-      // Check if we should trigger generation
-      if (parsed.shouldGenerate && state.conversationPhase === 'clarifying') {
-        setIsGenerating(true);
-        dispatch({ type: 'SET_PHASE', payload: 'generating' });
+    // Check if we should trigger generation
+    if (parsed.shouldGenerate && state.conversationPhase === 'clarifying') {
+      setIsGenerating(true);
+      dispatch({ type: 'SET_PHASE', payload: 'generating' });
 
-        // Trigger generation with a slight delay to update the phase
-        setTimeout(() => {
-          triggerGeneration();
-        }, 100);
+      // Trigger generation with a slight delay to update the phase
+      setTimeout(() => {
+        triggerGeneration();
+      }, 100);
+    }
+
+    // Check if requirements were generated
+    if (parsed.requirements) {
+      dispatch({ type: 'SET_REQUIREMENTS', payload: parsed.requirements });
+    }
+
+    // Check if tasks were generated
+    if (parsed.tasks) {
+      dispatch({ type: 'SET_TASKS', payload: parsed.tasks });
+      dispatch({ type: 'SET_PHASE', payload: 'complete' });
+      dispatch({ type: 'SET_ACTIVE_TAB', payload: 'tasks' });
+      setIsGenerating(false);
+    }
+  };
+
+  const sendMessage = async (content: string) => {
+    const userMessage = { id: `user_${Date.now()}`, role: 'user' as const, content };
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
+    setIsLoading(true);
+
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
+          phase: state.conversationPhase,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('API Error:', response.status, errorText);
+        throw new Error(`Request failed: ${response.status}`);
       }
 
-      // Check if requirements were generated
-      if (parsed.requirements) {
-        dispatch({ type: 'SET_REQUIREMENTS', payload: parsed.requirements });
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let fullContent = '';
+      const assistantId = `assistant_${Date.now()}`;
+
+      // Add placeholder message
+      setMessages((prev) => [...prev, { id: assistantId, role: 'assistant', content: '' }]);
+
+      while (reader) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        fullContent += chunk;
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantId ? { ...m, content: fullContent } : m))
+        );
       }
 
-      // Check if tasks were generated
-      if (parsed.tasks) {
-        dispatch({ type: 'SET_TASKS', payload: parsed.tasks });
-        dispatch({ type: 'SET_PHASE', payload: 'complete' });
-        dispatch({ type: 'SET_ACTIVE_TAB', payload: 'tasks' });
-        setIsGenerating(false);
-      }
-    },
-  });
+      handleAIResponse(fullContent);
+    } catch (error) {
+      console.error('Chat error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      setMessages((prev) => [
+        ...prev,
+        { id: `error_${Date.now()}`, role: 'assistant', content: `Sorry, there was an error: ${errorMessage}. Check that ANTHROPIC_API_KEY is set in .env.local` },
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Check if we should show welcome dialog on mount (empty state)
   useEffect(() => {
@@ -161,30 +206,32 @@ export function ChatPanel() {
         if (done) break;
 
         const chunk = decoder.decode(value);
-        // Parse SSE data
-        const lines = chunk.split('\n');
-        for (const line of lines) {
-          if (line.startsWith('0:')) {
-            // Text chunk
-            const text = JSON.parse(line.slice(2));
-            fullContent += text;
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === placeholderId ? { ...m, content: fullContent } : m
-              )
-            );
-          }
-        }
+        fullContent += chunk;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === placeholderId ? { ...m, content: fullContent } : m
+          )
+        );
       }
 
       // Parse the complete response
+      console.log('Generation complete, full content length:', fullContent.length);
+      console.log('Full content preview:', fullContent.substring(0, 500));
       const parsed = parseAIResponse(fullContent);
 
+      console.log('Parsed result:', {
+        hasRequirements: !!parsed.requirements,
+        hasTasks: !!parsed.tasks,
+        tasksCount: parsed.tasks?.length,
+      });
+
       if (parsed.requirements) {
+        console.log('Dispatching SET_REQUIREMENTS');
         dispatch({ type: 'SET_REQUIREMENTS', payload: parsed.requirements });
       }
 
       if (parsed.tasks) {
+        console.log('Dispatching SET_TASKS with', parsed.tasks.length, 'tasks');
         dispatch({ type: 'SET_TASKS', payload: parsed.tasks });
         dispatch({ type: 'SET_PHASE', payload: 'complete' });
         dispatch({ type: 'SET_ACTIVE_TAB', payload: 'tasks' });
@@ -237,21 +284,22 @@ export function ChatPanel() {
   };
 
   const handleWelcomeSubmit = (description: string) => {
-    // Append the user's message from the welcome dialog
-    append({
-      role: 'user',
-      content: description,
-    });
+    sendMessage(description);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!localInput.trim() || isLoading || isGenerating) return;
-    append({ role: 'user', content: localInput });
+    sendMessage(localInput);
     setLocalInput('');
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Allow native shortcuts like Cmd+A, Cmd+C, Cmd+V
+    if ((e.metaKey || e.ctrlKey) && ['a', 'c', 'v', 'x', 'z'].includes(e.key.toLowerCase())) {
+      e.stopPropagation();
+      return;
+    }
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       handleSubmit(e);
@@ -268,7 +316,7 @@ export function ChatPanel() {
         onSubmit={handleWelcomeSubmit}
       />
 
-      <div className="flex w-[420px] flex-col border-r border-border bg-card">
+      <div className="flex h-full w-[420px] flex-col overflow-hidden border-r border-border bg-card">
         {/* Header */}
         <div className="flex h-16 items-center justify-between border-b border-border px-6">
           <div className="flex items-center gap-3">
@@ -310,7 +358,7 @@ export function ChatPanel() {
         </div>
 
         {/* Messages */}
-        <ScrollArea className="flex-1 px-4 py-6" ref={scrollRef}>
+        <ScrollArea className="min-h-0 flex-1 px-4 py-6" ref={scrollRef}>
           <div className="space-y-6">
             {messages.map((message) => (
               <div
