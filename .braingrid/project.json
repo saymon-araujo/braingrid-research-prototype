@@ -1,0 +1,15 @@
+{
+  "organization_id": "d0cd5a67-cf27-4ca9-b32f-0ea2a593b4ab",
+  "project_id": "c1afd89e-a74f-4ef9-b339-a74bf330c10d",
+  "project_short_id": "PROJ-4",
+  "project_name": "braingrid-prototype",
+  "project_description": null,
+  "repository": {
+    "id": "9d829e55-7ceb-42ea-8d1f-bb29fcce5672",
+    "owner": "saymon-araujo",
+    "name": "braingrid-research-prototype",
+    "full_name": "saymon-araujo/braingrid-research-prototype",
+    "url": "https://github.com/saymon-araujo/braingrid-research-prototype.git"
+  },
+  "created_at": "2026-01-09T10:45:12.623Z"
+}
