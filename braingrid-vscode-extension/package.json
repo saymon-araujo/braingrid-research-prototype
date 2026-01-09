@@ -1,0 +1,50 @@
+{
+  "name": "braingrid-local-scanner",
+  "displayName": "BrainGrid Local Scanner",
+  "description": "AI-powered project planning tool that scans your codebase and syncs with BrainGrid cloud for intelligent requirement and task management.",
+  "version": "0.1.0",
+  "publisher": "braingrid-ai",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "braingrid.scan",
+        "title": "BrainGrid: Scan Project"
+      },
+      {
+        "command": "braingrid.sync",
+        "title": "BrainGrid: Sync to Cloud"
+      },
+      {
+        "command": "braingrid.openChat",
+        "title": "BrainGrid: Open Chat"
+      },
+      {
+        "command": "braingrid.viewArtifacts",
+        "title": "BrainGrid: View Artifacts"
+      },
+      {
+        "command": "braingrid.login",
+        "title": "BrainGrid: Login"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.0.0"
+  }
+}
