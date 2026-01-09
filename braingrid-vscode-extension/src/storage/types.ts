@@ -1,9 +1,44 @@
+import { ArtifactType } from '../scanner/types';
+
 /**
  * Configuration for the StorageManager
  */
 export interface StorageConfig {
     workspaceRoot: string;
 }
+
+/**
+ * Metadata for a stored artifact
+ */
+export interface ArtifactMetadata {
+    generatedAt: string;  // ISO8601
+    fileCount: number;
+    errorCount: number;
+    version: number;
+    incomplete?: boolean;
+}
+
+/**
+ * Stored artifact with metadata wrapper
+ */
+export interface StoredArtifact {
+    id: string;           // UUID
+    type: ArtifactType;
+    workspacePath: string;
+    content: string;      // JSON string from generator
+    metadata: ArtifactMetadata;
+}
+
+/**
+ * Artifact filename mapping
+ */
+export const ARTIFACT_FILENAMES: Record<ArtifactType, string> = {
+    'directory': 'directory-structure.json',
+    'summary': 'codebase-summary.json',
+    'dataModel': 'data-model.json',
+    'architecture': 'architecture.json',
+    'workflow': 'workflows.json'
+};
 
 /**
  * Result of workspace initialization

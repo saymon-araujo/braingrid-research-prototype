@@ -1,7 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { InitResult, Task, Subtask, ResearchResults, ResearchSession, ResearchFinding, MAX_RESEARCH_SESSIONS, ScanMetadata } from './types';
+import { InitResult, Task, Subtask, ResearchResults, ResearchSession, ResearchFinding, MAX_RESEARCH_SESSIONS, ScanMetadata, StoredArtifact, ArtifactMetadata, ARTIFACT_FILENAMES } from './types';
+import { ArtifactType, ArtifactResult } from '../scanner/types';
 
 /**
  * StorageManager handles workspace folder structure creation and provides
@@ -168,6 +169,306 @@ export class StorageManager {
         } catch {
             return [];
         }
+    }
+
+    // ==================== Artifact Storage with Metadata ====================
+
+    /**
+     * Store an artifact with full metadata, atomic writes, and versioning.
+     * @param type - The artifact type
+     * @param result - The ArtifactResult from a generator
+     */
+    async storeArtifact(type: ArtifactType, result: ArtifactResult): Promise<void> {
+        const filePath = this.getArtifactPath(type);
+        const tmpPath = `${filePath}.tmp`;
+        const previousPath = this.getPreviousArtifactPath(type);
+
+        // Load existing for versioning
+        const existing = await this.getStoredArtifact(type);
+        const version = existing ? existing.metadata.version + 1 : 1;
+
+        const artifact: StoredArtifact = {
+            id: crypto.randomUUID(),
+            type,
+            workspacePath: this.workspaceRoot,
+            content: result.content,
+            metadata: {
+                generatedAt: result.generatedAt,
+                fileCount: result.fileCount,
+                errorCount: result.errorCount,
+                version,
+                incomplete: result.incomplete
+            }
+        };
+
+        // Validate before saving
+        if (!this.validateStoredArtifact(artifact)) {
+            throw new Error(`Invalid artifact structure for type: ${type}`);
+        }
+
+        try {
+            // Backup existing to .previous.json
+            if (existing) {
+                try {
+                    await fs.promises.writeFile(previousPath, JSON.stringify(existing, null, 2), 'utf-8');
+                } catch (backupError) {
+                    console.warn(`Failed to create artifact backup for ${type}:`, backupError);
+                }
+            }
+
+            // Write to temp file first
+            await fs.promises.writeFile(tmpPath, JSON.stringify(artifact, null, 2), 'utf-8');
+
+            // Atomically rename temp to target
+            await fs.promises.rename(tmpPath, filePath);
+        } catch (error) {
+            // Clean up temp file if it exists
+            try {
+                await fs.promises.unlink(tmpPath);
+            } catch {
+                // Ignore cleanup errors
+            }
+
+            const err = error as NodeJS.ErrnoException;
+            if (err.code === 'ENOSPC') {
+                throw new Error(`Cannot store ${type} artifact. Disk full`);
+            }
+            if (err.code === 'EACCES') {
+                throw new Error(`Cannot store ${type} artifact. Permission denied`);
+            }
+            throw new Error(`Failed to store ${type} artifact: ${err.message}`);
+        }
+    }
+
+    /**
+     * Get a stored artifact with its metadata.
+     * @param type - The artifact type to retrieve
+     * @returns The stored artifact, or null if not found
+     */
+    async getStoredArtifact(type: ArtifactType): Promise<StoredArtifact | null> {
+        const filePath = this.getArtifactPath(type);
+
+        try {
+            const content = await fs.promises.readFile(filePath, 'utf-8');
+            const data = JSON.parse(content);
+
+            if (!this.validateStoredArtifact(data)) {
+                console.warn(`Invalid stored artifact structure for ${type}`);
+                return null;
+            }
+
+            return data;
+        } catch (error) {
+            const err = error as NodeJS.ErrnoException;
+            if (err.code === 'ENOENT') {
+                return null;
+            }
+            if (err.code === 'EACCES') {
+                throw new Error(`Cannot read ${type} artifact. Permission denied`);
+            }
+            if (error instanceof SyntaxError) {
+                console.error(`Corrupted ${type} artifact JSON detected`);
+                return null;
+            }
+            console.warn(`Failed to load ${type} artifact: ${err.message}`);
+            return null;
+        }
+    }
+
+    /**
+     * List all stored artifacts with metadata.
+     * @returns Array of stored artifacts
+     */
+    async listStoredArtifacts(): Promise<StoredArtifact[]> {
+        const artifacts: StoredArtifact[] = [];
+
+        for (const type of Object.keys(ARTIFACT_FILENAMES) as ArtifactType[]) {
+            const artifact = await this.getStoredArtifact(type);
+            if (artifact) {
+                artifacts.push(artifact);
+            }
+        }
+
+        return artifacts;
+    }
+
+    /**
+     * Delete an artifact and its previous version.
+     * @param type - The artifact type to delete
+     */
+    async deleteArtifact(type: ArtifactType): Promise<void> {
+        const filePath = this.getArtifactPath(type);
+        const previousPath = this.getPreviousArtifactPath(type);
+
+        // Delete main artifact
+        try {
+            await fs.promises.unlink(filePath);
+        } catch (error) {
+            const err = error as NodeJS.ErrnoException;
+            if (err.code !== 'ENOENT') {
+                if (err.code === 'EACCES') {
+                    throw new Error(`Cannot delete ${type} artifact. Permission denied`);
+                }
+                throw new Error(`Failed to delete ${type} artifact: ${err.message}`);
+            }
+        }
+
+        // Delete previous version
+        try {
+            await fs.promises.unlink(previousPath);
+        } catch (error) {
+            const err = error as NodeJS.ErrnoException;
+            if (err.code !== 'ENOENT') {
+                console.warn(`Failed to delete ${type} previous artifact: ${err.message}`);
+            }
+        }
+    }
+
+    /**
+     * Restore a previous version of an artifact.
+     * @param type - The artifact type to restore
+     * @returns true if restored, false if no previous version
+     */
+    async restoreArtifact(type: ArtifactType): Promise<boolean> {
+        const filePath = this.getArtifactPath(type);
+        const previousPath = this.getPreviousArtifactPath(type);
+
+        try {
+            // Check if previous version exists
+            await fs.promises.access(previousPath, fs.constants.R_OK);
+
+            // Read previous version
+            const content = await fs.promises.readFile(previousPath, 'utf-8');
+            const previousArtifact = JSON.parse(content);
+
+            // Validate previous artifact
+            if (!this.validateStoredArtifact(previousArtifact)) {
+                console.warn(`Invalid previous artifact structure for ${type}`);
+                return false;
+            }
+
+            // Write to temp file first
+            const tmpPath = `${filePath}.tmp`;
+            await fs.promises.writeFile(tmpPath, content, 'utf-8');
+
+            // Atomically rename temp to target
+            await fs.promises.rename(tmpPath, filePath);
+
+            // Delete previous version after successful restore
+            try {
+                await fs.promises.unlink(previousPath);
+            } catch {
+                // Ignore cleanup errors
+            }
+
+            return true;
+        } catch (error) {
+            const err = error as NodeJS.ErrnoException;
+            if (err.code === 'ENOENT') {
+                return false; // No previous version
+            }
+            if (error instanceof SyntaxError) {
+                console.error(`Corrupted previous ${type} artifact JSON`);
+                return false;
+            }
+            console.warn(`Failed to restore ${type} artifact: ${err.message}`);
+            return false;
+        }
+    }
+
+    /**
+     * Check if an artifact exists.
+     * @param type - The artifact type to check
+     * @returns true if artifact exists, false otherwise
+     */
+    async hasStoredArtifact(type: ArtifactType): Promise<boolean> {
+        const filePath = this.getArtifactPath(type);
+        return this.fileExists(filePath);
+    }
+
+    /**
+     * Check if a previous version of an artifact exists.
+     * @param type - The artifact type to check
+     * @returns true if previous version exists, false otherwise
+     */
+    async hasPreviousArtifact(type: ArtifactType): Promise<boolean> {
+        const previousPath = this.getPreviousArtifactPath(type);
+        return this.fileExists(previousPath);
+    }
+
+    /**
+     * Get the file path for a stored artifact.
+     */
+    private getArtifactPath(type: ArtifactType): string {
+        const filename = ARTIFACT_FILENAMES[type];
+        return path.join(this.artifactsPath, filename);
+    }
+
+    /**
+     * Get the file path for a previous version of an artifact.
+     */
+    private getPreviousArtifactPath(type: ArtifactType): string {
+        const filename = ARTIFACT_FILENAMES[type];
+        const baseName = filename.replace('.json', '');
+        return path.join(this.artifactsPath, `${baseName}.previous.json`);
+    }
+
+    /**
+     * Validate a stored artifact has the required structure.
+     */
+    private validateStoredArtifact(artifact: unknown): artifact is StoredArtifact {
+        if (typeof artifact !== 'object' || artifact === null) {
+            return false;
+        }
+
+        const a = artifact as Record<string, unknown>;
+
+        // Required string fields
+        if (typeof a.id !== 'string' || typeof a.type !== 'string' ||
+            typeof a.workspacePath !== 'string' || typeof a.content !== 'string') {
+            return false;
+        }
+
+        // Validate artifact type
+        const validTypes: ArtifactType[] = ['directory', 'summary', 'dataModel', 'architecture', 'workflow'];
+        if (!validTypes.includes(a.type as ArtifactType)) {
+            return false;
+        }
+
+        // Required metadata object
+        if (typeof a.metadata !== 'object' || a.metadata === null) {
+            return false;
+        }
+
+        const m = a.metadata as Record<string, unknown>;
+
+        // Validate metadata fields
+        if (typeof m.generatedAt !== 'string' ||
+            typeof m.fileCount !== 'number' ||
+            typeof m.errorCount !== 'number' ||
+            typeof m.version !== 'number') {
+            return false;
+        }
+
+        // Validate generatedAt is valid ISO8601
+        const date = new Date(m.generatedAt);
+        if (isNaN(date.getTime())) {
+            return false;
+        }
+
+        // Validate numbers are non-negative integers
+        if (!Number.isInteger(m.fileCount) || m.fileCount < 0 ||
+            !Number.isInteger(m.errorCount) || m.errorCount < 0 ||
+            !Number.isInteger(m.version) || m.version < 1) {
+            return false;
+        }
+
+        // incomplete is optional but must be boolean if present
+        if (m.incomplete !== undefined && typeof m.incomplete !== 'boolean') {
+            return false;
+        }
+
+        return true;
     }
 
     // ==================== Requirements Persistence ====================

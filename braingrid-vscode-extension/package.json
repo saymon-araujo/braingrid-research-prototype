@@ -43,7 +43,12 @@
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile"
   },
+  "dependencies": {
+    "minimatch": "^9.0.0",
+    "ts-morph": "^21.0.0"
+  },
   "devDependencies": {
+    "@types/minimatch": "^5.1.2",
     "@types/vscode": "^1.85.0",
     "typescript": "^5.0.0"
   }

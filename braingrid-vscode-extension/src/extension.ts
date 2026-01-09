@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { StorageManager, ConfigManager } from './storage';
+import { registerScanCommand } from './commands/scanCommand';
 
 let outputChannel: vscode.OutputChannel;
 
@@ -131,9 +132,11 @@ export function activate(context: vscode.ExtensionContext) {
         console.error('BrainGrid storage initialization failed:', error);
     });
 
-    // Register commands
+    // Register scan command with full implementation
+    registerScanCommand(context, outputChannel);
+
+    // Register other commands (placeholder implementations)
     const commands = [
-        { id: 'braingrid.scan', name: 'Scan' },
         { id: 'braingrid.sync', name: 'Sync' },
         { id: 'braingrid.openChat', name: 'Open Chat' },
         { id: 'braingrid.viewArtifacts', name: 'View Artifacts' },
@@ -146,7 +149,7 @@ export function activate(context: vscode.ExtensionContext) {
             outputChannel.appendLine(`[${invokeTime}] ${cmd.name} command invoked`);
 
             // Check storage availability for commands that need it
-            if (cmd.id === 'braingrid.scan' || cmd.id === 'braingrid.viewArtifacts') {
+            if (cmd.id === 'braingrid.viewArtifacts') {
                 if (!storageManager) {
                     vscode.window.showWarningMessage('Storage not available. Open a workspace to use this command.');
                     return;
@@ -158,7 +161,7 @@ export function activate(context: vscode.ExtensionContext) {
         context.subscriptions.push(disposable);
     }
 
-    outputChannel.appendLine(`Registered ${commands.length} commands`);
+    outputChannel.appendLine(`Registered ${commands.length + 1} commands`);
 
     // Show output channel
     outputChannel.show(true);
