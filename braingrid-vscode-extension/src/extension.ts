@@ -3,12 +3,20 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { StorageManager, ConfigManager } from './storage';
 import { registerScanCommand } from './commands/scanCommand';
+import { registerGenerateDocsCommand } from './commands/generateDocsCommand';
+import { toggleTaskCompletion, sendTaskToCursor } from './commands/taskCommands';
+import { startPlanningSession } from './commands/planningSession';
+import { BrainGridTreeProvider, TaskTreeItem } from './views';
+import { ChatPanel, ChatViewProvider } from './webview';
 
 let outputChannel: vscode.OutputChannel;
 
 // Module-level storage instances (null if memory-only mode)
 let storageManager: StorageManager | null = null;
 let configManager: ConfigManager | null = null;
+let treeProvider: BrainGridTreeProvider | null = null;
+let treeView: vscode.TreeView<any> | null = null;
+let chatViewProvider: ChatViewProvider | null = null;
 
 /**
  * Get the StorageManager instance.
@@ -113,8 +121,28 @@ async function initializeStorage(context: vscode.ExtensionContext): Promise<void
     configManager = new ConfigManager(storageManager, context);
     outputChannel.appendLine('ConfigManager initialized successfully');
 
+    // Update TreeView provider with storage manager
+    if (treeProvider) {
+        // Dispose old provider and create new one with storage
+        treeProvider.dispose();
+    }
+    treeProvider = new BrainGridTreeProvider(storageManager);
+    treeView = vscode.window.createTreeView('braingridExplorer', {
+        treeDataProvider: treeProvider,
+        showCollapseAll: true
+    });
+    context.subscriptions.push(treeView);
+    context.subscriptions.push(treeProvider);
+    outputChannel.appendLine('TreeView initialized with storage');
+
     // Ensure .gitignore entry for config.json
     await ensureGitignoreEntry(workspaceRoot);
+
+    // Update ChatViewProvider with storage manager
+    if (chatViewProvider) {
+        chatViewProvider.setStorageManager(storageManager);
+        outputChannel.appendLine('ChatViewProvider updated with storage');
+    }
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -126,6 +154,30 @@ export function activate(context: vscode.ExtensionContext) {
     const timestamp = new Date().toISOString();
     outputChannel.appendLine(`BrainGrid extension activated at ${timestamp}`);
 
+    // Create initial TreeView (shows empty state until storage is ready)
+    treeProvider = new BrainGridTreeProvider(null);
+    treeView = vscode.window.createTreeView('braingridExplorer', {
+        treeDataProvider: treeProvider,
+        showCollapseAll: true
+    });
+    context.subscriptions.push(treeView);
+    context.subscriptions.push(treeProvider);
+    outputChannel.appendLine('TreeView created (awaiting storage initialization)');
+
+    // Register ChatViewProvider for sidebar chat
+    chatViewProvider = new ChatViewProvider(context.extensionUri, outputChannel);
+    const chatViewDisposable = vscode.window.registerWebviewViewProvider(
+        ChatViewProvider.viewType,
+        chatViewProvider,
+        {
+            webviewOptions: {
+                retainContextWhenHidden: true
+            }
+        }
+    );
+    context.subscriptions.push(chatViewDisposable);
+    outputChannel.appendLine('ChatViewProvider registered');
+
     // Initialize storage (async, but we don't block activation)
     initializeStorage(context).catch(error => {
         outputChannel.appendLine(`Storage initialization error: ${error}`);
@@ -135,11 +187,88 @@ export function activate(context: vscode.ExtensionContext) {
     // Register scan command with full implementation
     registerScanCommand(context, outputChannel);
 
+    // Register generate documentation command
+    registerGenerateDocsCommand(context, outputChannel);
+
+    // Register viewArtifacts command to focus TreeView (Explorer section)
+    const viewArtifactsDisposable = vscode.commands.registerCommand('braingrid.viewArtifacts', async () => {
+        const invokeTime = new Date().toISOString();
+        outputChannel.appendLine(`[${invokeTime}] View Artifacts command invoked`);
+
+        // Focus the Explorer view in the sidebar
+        await vscode.commands.executeCommand('braingridExplorer.focus');
+    });
+    context.subscriptions.push(viewArtifactsDisposable);
+
+    // Register task toggle command
+    const toggleTaskDisposable = vscode.commands.registerCommand(
+        'braingrid.toggleTask',
+        (taskId: string, subtaskId: string | null) => {
+            if (storageManager && treeProvider) {
+                toggleTaskCompletion(taskId, subtaskId, storageManager, treeProvider, outputChannel);
+            } else {
+                vscode.window.showWarningMessage('Storage not available. Open a workspace first.');
+            }
+        }
+    );
+    context.subscriptions.push(toggleTaskDisposable);
+
+    // Register send to Cursor command (receives TaskTreeItem from context menu)
+    const sendToCursorDisposable = vscode.commands.registerCommand(
+        'braingrid.sendTaskToCursor',
+        (item: TaskTreeItem) => {
+            if (storageManager && item?.task) {
+                sendTaskToCursor(item.task, storageManager, outputChannel);
+            } else if (!storageManager) {
+                vscode.window.showWarningMessage('Storage not available. Open a workspace first.');
+            } else {
+                vscode.window.showWarningMessage('No task selected.');
+            }
+        }
+    );
+    context.subscriptions.push(sendToCursorDisposable);
+
+    // Register openChat command with ChatPanel
+    const openChatDisposable = vscode.commands.registerCommand(
+        'braingrid.openChat',
+        () => {
+            const invokeTime = new Date().toISOString();
+            outputChannel.appendLine(`[${invokeTime}] Open Chat command invoked`);
+            const panel = ChatPanel.createOrShow(context, outputChannel);
+
+            // Wire up StorageManager if available
+            if (storageManager) {
+                panel.setStorageManager(storageManager);
+            }
+        }
+    );
+    context.subscriptions.push(openChatDisposable);
+
+    // Register startPlanning command - orchestrates the complete planning flow
+    const startPlanningDisposable = vscode.commands.registerCommand(
+        'braingrid.startPlanning',
+        () => {
+            startPlanningSession(chatViewProvider, storageManager, outputChannel);
+        }
+    );
+    context.subscriptions.push(startPlanningDisposable);
+
+    // Register refresh command to manually refresh TreeView
+    const refreshDisposable = vscode.commands.registerCommand(
+        'braingrid.refresh',
+        () => {
+            const invokeTime = new Date().toISOString();
+            outputChannel.appendLine(`[${invokeTime}] Refresh command invoked`);
+            if (treeProvider) {
+                treeProvider.refresh();
+            }
+        }
+    );
+    context.subscriptions.push(refreshDisposable);
+
     // Register other commands (placeholder implementations)
     const commands = [
         { id: 'braingrid.sync', name: 'Sync' },
-        { id: 'braingrid.openChat', name: 'Open Chat' },
-        { id: 'braingrid.viewArtifacts', name: 'View Artifacts' },
         { id: 'braingrid.login', name: 'Login' },
     ];
 
@@ -148,28 +277,23 @@ export function activate(context: vscode.ExtensionContext) {
             const invokeTime = new Date().toISOString();
             outputChannel.appendLine(`[${invokeTime}] ${cmd.name} command invoked`);
 
-            // Check storage availability for commands that need it
-            if (cmd.id === 'braingrid.viewArtifacts') {
-                if (!storageManager) {
-                    vscode.window.showWarningMessage('Storage not available. Open a workspace to use this command.');
-                    return;
-                }
-            }
-
             vscode.window.showInformationMessage(`BrainGrid: ${cmd.name} command invoked`);
         });
         context.subscriptions.push(disposable);
     }
 
-    outputChannel.appendLine(`Registered ${commands.length + 1} commands`);
+    outputChannel.appendLine(`Registered ${commands.length + 8} commands`);
 
     // Show output channel
     outputChannel.show(true);
 }
 
 export function deactivate() {
-    // Clean up storage references
+    // Clean up references
     storageManager = null;
     configManager = null;
+    treeProvider = null;
+    treeView = null;
+    chatViewProvider = null;
     // Resources are automatically disposed via context.subscriptions
 }

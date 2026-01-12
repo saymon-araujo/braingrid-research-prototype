@@ -36,9 +36,15 @@ export async function executeScanCommand(
         workspacePath = selected.path;
     }
 
+    // Read configuration settings
+    const config = vscode.workspace.getConfiguration('braingrid');
+    const generateDocumentation = config.get<boolean>('generateDocumentation', false);
+    const documentationApiEndpoint = config.get<string>('documentationApiEndpoint', 'http://localhost:3000/api/ai-documentation');
+
     // Run scan with progress UI
     const startTime = Date.now();
     outputChannel.appendLine(`[${new Date().toISOString()}] Starting scan: ${workspacePath}`);
+    outputChannel.appendLine(`  Documentation generation: ${generateDocumentation ? 'enabled' : 'disabled'}`);
 
     await vscode.window.withProgress(
         {
@@ -47,7 +53,10 @@ export async function executeScanCommand(
             cancellable: true
         },
         async (progress, token) => {
-            const orchestrator = new ScanOrchestrator(workspacePath);
+            const orchestrator = new ScanOrchestrator(workspacePath, {
+                generateDocumentation,
+                documentationApiEndpoint
+            });
             let lastProgress = 0;
 
             // Wire progress callback

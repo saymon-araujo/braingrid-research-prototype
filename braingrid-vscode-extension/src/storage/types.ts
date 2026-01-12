@@ -1,5 +1,8 @@
 import { ArtifactType } from '../scanner/types';
 
+// Re-export ArtifactType for use by other modules
+export { ArtifactType };
+
 /**
  * Configuration for the StorageManager
  */
@@ -33,11 +36,17 @@ export interface StoredArtifact {
  * Artifact filename mapping
  */
 export const ARTIFACT_FILENAMES: Record<ArtifactType, string> = {
+    // Raw JSON artifacts
     'directory': 'directory-structure.json',
     'summary': 'codebase-summary.json',
     'dataModel': 'data-model.json',
     'architecture': 'architecture.json',
-    'workflow': 'workflows.json'
+    'workflow': 'workflows.json',
+    // AI-generated markdown documentation
+    'summary-docs': 'codebase-summary.md',
+    'dataModel-docs': 'data-model.md',
+    'architecture-docs': 'architecture.md',
+    'workflow-docs': 'workflows.md'
 };
 
 /**

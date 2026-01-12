@@ -155,18 +155,23 @@ export class WorkflowDetector {
         this.fileCount = 0;
 
         // Parse gitignore
+        console.log('  [workflow] Parsing gitignore...');
         this.gitignorePatterns = await parseGitignore(this.workspacePath);
 
-        // Gather all information in parallel
-        const [crudOperations, handlersAndGraph] = await Promise.all([
-            this.detectCRUDOperations(),
-            this.extractHandlersAndCallGraph()
-        ]);
+        // Run sequentially with progress logging
+        console.log('  [workflow] Step 1/3: Detecting CRUD operations...');
+        const crudOperations = await this.detectCRUDOperations();
+        console.log(`  [workflow] Step 1/3 complete: Found ${crudOperations.length} CRUD operations`);
 
+        console.log('  [workflow] Step 2/3: Extracting handlers and call graph (this may take a while)...');
+        const handlersAndGraph = await this.extractHandlersAndCallGraph();
         const { handlers, callGraph } = handlersAndGraph;
+        console.log(`  [workflow] Step 2/3 complete: ${handlers.length} handlers, ${callGraph.length} call edges`);
 
         // Group into workflows
+        console.log('  [workflow] Step 3/3: Grouping into workflows...');
         const workflows = this.groupIntoWorkflows(crudOperations, handlers, callGraph);
+        console.log(`  [workflow] Step 3/3 complete: ${workflows.length} workflows identified`);
 
         const workflowModel: WorkflowModel = {
             workflows,
@@ -371,6 +376,10 @@ export class WorkflowDetector {
                 await this.traverseForHandlers(entryPath, depth + 1, handlers, callGraph);
             } else if (this.isCodeFile(entry)) {
                 this.fileCount++;
+                // Log progress every 100 files
+                if (this.fileCount % 100 === 0) {
+                    console.log(`  [workflow] Analyzed ${this.fileCount} files...`);
+                }
                 await this.analyzeFileForHandlers(entryPath, relativePath, handlers, callGraph);
             }
         }

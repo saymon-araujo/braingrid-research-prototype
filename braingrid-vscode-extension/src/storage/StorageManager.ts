@@ -207,13 +207,11 @@ export class StorageManager {
         }
 
         try {
-            // Backup existing to .previous.json
-            if (existing) {
-                try {
-                    await fs.promises.writeFile(previousPath, JSON.stringify(existing, null, 2), 'utf-8');
-                } catch (backupError) {
-                    console.warn(`Failed to create artifact backup for ${type}:`, backupError);
-                }
+            // Delete any existing previous version (cleanup)
+            try {
+                await fs.promises.unlink(previousPath);
+            } catch {
+                // Ignore if file doesn't exist
             }
 
             // Write to temp file first
@@ -409,8 +407,10 @@ export class StorageManager {
      */
     private getPreviousArtifactPath(type: ArtifactType): string {
         const filename = ARTIFACT_FILENAMES[type];
-        const baseName = filename.replace('.json', '');
-        return path.join(this.artifactsPath, `${baseName}.previous.json`);
+        // Handle both .json and .md extensions
+        const extension = filename.endsWith('.md') ? '.md' : '.json';
+        const baseName = filename.replace(extension, '');
+        return path.join(this.artifactsPath, `${baseName}.previous${extension}`);
     }
 
     /**
@@ -429,8 +429,11 @@ export class StorageManager {
             return false;
         }
 
-        // Validate artifact type
-        const validTypes: ArtifactType[] = ['directory', 'summary', 'dataModel', 'architecture', 'workflow'];
+        // Validate artifact type (raw JSON + documentation markdown)
+        const validTypes: ArtifactType[] = [
+            'directory', 'summary', 'dataModel', 'architecture', 'workflow',
+            'summary-docs', 'dataModel-docs', 'architecture-docs', 'workflow-docs'
+        ];
         if (!validTypes.includes(a.type as ArtifactType)) {
             return false;
         }

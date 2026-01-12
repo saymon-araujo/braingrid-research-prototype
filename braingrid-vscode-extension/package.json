@@ -15,10 +15,39 @@
     "onStartupFinished"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "braingrid",
+          "title": "BrainGrid",
+          "icon": "$(beaker)"
+        }
+      ]
+    },
+    "views": {
+      "braingrid": [
+        {
+          "id": "braingridChat",
+          "name": "Chat",
+          "type": "webview"
+        },
+        {
+          "id": "braingridExplorer",
+          "name": "Explorer",
+          "contextualTitle": "BrainGrid Explorer"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "braingrid.scan",
-        "title": "BrainGrid: Scan Project"
+        "title": "BrainGrid: Scan Project",
+        "icon": "$(search)"
+      },
+      {
+        "command": "braingrid.refresh",
+        "title": "BrainGrid: Refresh",
+        "icon": "$(refresh)"
       },
       {
         "command": "braingrid.sync",
@@ -26,7 +55,14 @@
       },
       {
         "command": "braingrid.openChat",
-        "title": "BrainGrid: Open Chat"
+        "title": "BrainGrid: Open Chat",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "braingrid.startPlanning",
+        "title": "BrainGrid: Start Planning Session",
+        "icon": "$(add)",
+        "category": "BrainGrid"
       },
       {
         "command": "braingrid.viewArtifacts",
@@ -35,12 +71,90 @@
       {
         "command": "braingrid.login",
         "title": "BrainGrid: Login"
+      },
+      {
+        "command": "braingrid.toggleTask",
+        "title": "Toggle Task Completion"
+      },
+      {
+        "command": "braingrid.sendTaskToCursor",
+        "title": "Send to Cursor AI"
+      },
+      {
+        "command": "braingrid.generateDocs",
+        "title": "BrainGrid: Generate Documentation",
+        "icon": "$(file-text)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "braingrid.startPlanning",
+          "when": "view == braingridExplorer",
+          "group": "navigation@1"
+        },
+        {
+          "command": "braingrid.scan",
+          "when": "view == braingridExplorer",
+          "group": "navigation@2"
+        },
+        {
+          "command": "braingrid.generateDocs",
+          "when": "view == braingridExplorer",
+          "group": "navigation@3"
+        },
+        {
+          "command": "braingrid.refresh",
+          "when": "view == braingridExplorer",
+          "group": "navigation@4"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "braingrid.sendTaskToCursor",
+          "when": "view == braingridExplorer && viewItem == task",
+          "group": "braingrid@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "BrainGrid",
+      "properties": {
+        "braingrid.cursorIntegration": {
+          "type": "string",
+          "enum": ["auto", "api", "clipboard"],
+          "default": "auto",
+          "enumDescriptions": [
+            "Try Cursor API first, fall back to clipboard",
+            "Use Cursor API only (may fail outside Cursor)",
+            "Always use clipboard"
+          ],
+          "description": "Method for sending tasks to Cursor AI. 'auto' is recommended for best compatibility."
+        },
+        "braingrid.generateDocumentation": {
+          "type": "boolean",
+          "default": true,
+          "description": "Generate AI-powered markdown documentation after scanning. Requires the development server to be running."
+        },
+        "braingrid.documentationApiEndpoint": {
+          "type": "string",
+          "default": "http://localhost:3000/api/ai-documentation",
+          "description": "API endpoint for AI documentation generation. Change this if your development server is running on a different port."
+        }
+      }
+    },
+    "viewsWelcome": [
+      {
+        "view": "braingridExplorer",
+        "contents": "Get started with AI-powered project planning.\n[Scan Project](command:braingrid.scan)\nAnalyze your codebase to enable planning features.\n\n[Start Planning Session](command:braingrid.startPlanning)\nOpen the planning chat (requires scan first)."
       }
     ]
   },
   "scripts": {
-    "compile": "tsc -p ./",
+    "build:webview": "cd webview-ui && npm run build",
+    "compile": "npm run build:webview && tsc -p ./",
     "watch": "tsc -watch -p ./",
+    "watch:webview": "cd webview-ui && npm run dev",
     "pretest": "npm run compile"
   },
   "dependencies": {

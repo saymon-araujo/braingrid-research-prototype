@@ -138,14 +138,22 @@ export class ArchitectureMapper {
         this.fileCount = 0;
 
         // Parse gitignore
+        console.log('  [architecture] Parsing gitignore...');
         this.gitignorePatterns = await parseGitignore(this.workspacePath);
 
-        // Gather all information in parallel
-        const [layers, entryPoints, dependencyInfo] = await Promise.all([
-            this.detectLayers(),
-            this.findEntryPoints(),
-            this.analyzeDependencies()
-        ]);
+        // Run sequentially with progress logging instead of parallel
+        // This makes progress more visible
+        console.log('  [architecture] Step 1/3: Detecting layers...');
+        const layers = await this.detectLayers();
+        console.log(`  [architecture] Step 1/3 complete: Found ${layers.length} layers`);
+
+        console.log('  [architecture] Step 2/3: Finding entry points...');
+        const entryPoints = await this.findEntryPoints();
+        console.log(`  [architecture] Step 2/3 complete: Found ${entryPoints.length} entry points`);
+
+        console.log('  [architecture] Step 3/3: Analyzing dependencies (this may take a while)...');
+        const dependencyInfo = await this.analyzeDependencies();
+        console.log(`  [architecture] Step 3/3 complete: ${this.fileCount} files, ${dependencyInfo.dependencies.length} deps, ${dependencyInfo.externalDeps.length} external`);
 
         const architecture: ArchitectureModel = {
             layers,
@@ -441,6 +449,10 @@ export class ArchitectureMapper {
                 );
             } else if (this.isCodeFile(entry)) {
                 this.fileCount++;
+                // Log progress every 100 files
+                if (this.fileCount % 100 === 0) {
+                    console.log(`  [architecture] Analyzed ${this.fileCount} files...`);
+                }
                 try {
                     const fileDep = analyzer.analyzeFile(entryPath);
 

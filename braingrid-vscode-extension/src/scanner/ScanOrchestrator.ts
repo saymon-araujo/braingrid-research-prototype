@@ -18,6 +18,8 @@ import { CodebaseSummaryGenerator } from './generators/CodebaseSummaryGenerator'
 import { DataModelExtractor } from './generators/DataModelExtractor';
 import { ArchitectureMapper } from './generators/ArchitectureMapper';
 import { WorkflowDetector } from './generators/WorkflowDetector';
+import { DocumentationGenerator } from './generators/DocumentationGenerator';
+import * as path from 'path';
 
 /**
  * Generator configuration type
@@ -44,9 +46,9 @@ export class ScanOrchestrator {
     ];
 
     /**
-     * Timeout for each generator in milliseconds (60 seconds)
+     * Timeout for each generator in milliseconds (15 minutes)
      */
-    private static readonly GENERATOR_TIMEOUT = 60000;
+    private static readonly GENERATOR_TIMEOUT = 900000;
 
     private readonly workspacePath: string;
     private readonly options: Required<ScanOptions>;
@@ -172,11 +174,92 @@ export class ScanOrchestrator {
             this.reportProgress(type, finalProgress, `${type} complete`);
         }
 
+        // Optional: Generate AI documentation
+        if (this.options.generateDocumentation) {
+            await this.generateDocumentation(artifacts, storage, errors);
+        }
+
         return {
             artifacts,
             duration: Date.now() - startTime,
             errors
         };
+    }
+
+    /**
+     * Generate AI-powered documentation for artifacts.
+     * @param artifacts - Generated raw artifacts
+     * @param storage - Storage manager for persisting results
+     * @param errors - Error array to append any failures
+     */
+    private async generateDocumentation(
+        artifacts: Partial<Record<ArtifactType, ArtifactResult>>,
+        storage: StorageManager,
+        errors: ScanError[]
+    ): Promise<void> {
+        // Check cancellation before documentation generation
+        if (this.isCancelled()) {
+            return;
+        }
+
+        this.reportProgress('documentation', 0, 'Generating AI documentation...');
+
+        const docGenerator = new DocumentationGenerator(this.workspacePath, {
+            apiEndpoint: this.options.documentationApiEndpoint,
+            projectName: path.basename(this.workspacePath)
+        });
+
+        // Check if API is available
+        const apiAvailable = await docGenerator.checkApiAvailability();
+        if (!apiAvailable) {
+            console.log('  [documentation] AI documentation API not available, skipping...');
+            errors.push({
+                stage: 'summary-docs' as ArtifactType,
+                message: 'Documentation API not available. Ensure the development server is running.'
+            });
+            return;
+        }
+
+        // Prepare artifacts map
+        const artifactsMap = new Map<string, string>();
+        for (const [type, result] of Object.entries(artifacts)) {
+            if (result && !result.incomplete) {
+                artifactsMap.set(type, result.content);
+            }
+        }
+
+        // Generate documentation
+        try {
+            const docResults = await docGenerator.generateAll(artifactsMap);
+
+            // Store documentation artifacts
+            let docCount = 0;
+            for (const [type, result] of docResults) {
+                try {
+                    // Add to artifacts record
+                    artifacts[type as ArtifactType] = result;
+
+                    // Store to disk
+                    await storage.storeArtifact(type as ArtifactType, result);
+                    docCount++;
+                } catch (storeError) {
+                    const storeMessage = storeError instanceof Error ? storeError.message : String(storeError);
+                    errors.push({
+                        stage: type as ArtifactType,
+                        message: `Storage failed: ${storeMessage}`
+                    });
+                }
+            }
+
+            this.reportProgress('documentation', 100, `Generated ${docCount} documentation files`);
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error('  [documentation] Error:', errorMessage);
+            errors.push({
+                stage: 'summary-docs' as ArtifactType,
+                message: `Documentation generation failed: ${errorMessage}`
+            });
+        }
     }
 
     /**
@@ -224,7 +307,7 @@ export class ScanOrchestrator {
             promise,
             new Promise<never>((_, reject) => {
                 setTimeout(() => {
-                    reject(new Error(`${stage} generator timed out after 60 seconds`));
+                    reject(new Error(`${stage} generator timed out after 15 minutes`));
                 }, ScanOrchestrator.GENERATOR_TIMEOUT);
             })
         ]);

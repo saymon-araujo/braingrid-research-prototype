@@ -91,9 +91,11 @@ Be specific and practical. Include real examples where helpful.`;
     const rawResearch = perplexityData.choices[0]?.message?.content || '';
     const citations = perplexityData.citations || [];
 
-    // Step 2: Use Claude Opus 4.5 to analyze and structure the research
+    // Step 2: Use Claude Sonnet 4 to analyze and structure the research
     const reasoningResult = await generateText({
-      model: anthropic('claude-opus-4-5-20251101'),
+      model: anthropic('claude-sonnet-4-20250514'),
+      maxTokens: 8000,
+      maxRetries: 5, // More retries for transient overload errors
       system: `You are a research analyst specializing in software development projects. Your task is to analyze raw research findings and:
 
 1. Extract and categorize key insights
